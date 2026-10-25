@@ -4,6 +4,8 @@
 
 默认双栈模式下，分别探测公网 IPv4 与 IPv6；有可用 IPv6 时输出两个独立节点，共用端口、UUID 和 Reality 参数。IPv6 不可用时只输出 IPv4，纯 IPv6 主机则输出 IPv6。
 
+<br>
+
 ## 一键安装
 
 仓库已公开，无需 GitHub 登录。在 Alpine 服务器上以 root 下载独立脚本并执行：
@@ -35,6 +37,8 @@ sh setup-sing-box.sh -p 57111
 `setup-sing-box.sh` 是独立脚本，不依赖仓库内其他文件。不带 `-p` 时，如果连接的是交互终端，会提示输入监听端口。
 
 > 只支持 Alpine Linux 和 OpenRC。脚本会安装依赖，并安装或替换本机的 `sing-box` 配置和同名服务；重复运行会生成新凭据。它不会操作其他名称的代理服务，也不会替你修改防火墙或 NAT 映射。
+
+<br>
 
 ## 参数
 
@@ -70,6 +74,8 @@ sh install.sh -p 57111 -s images.apple.com -v 1.14.4
 默认仍使用 `-e` 作为所有节点的连接端口；若 NAT 映射仅作用于 IPv4，可用 `-E` 单独设置原生 IPv6 的端口。`-H` 指定 IPv4 时保留该地址并补充探测到的 IPv6；指定 IPv6 时保留该地址并补充 IPv4；指定域名时保留域名并补充 IPv6。单协议模式只输出该模式探测到的地址或显式指定的地址。
 
 已指定的地址不会再次探测：例如 `-i 4 -H proxy.example.com` 不发公网探测请求；双栈模式指定 IPv4 时只探测 IPv6。HTTP 请求失败或返回的地址格式异常时，不采用该响应。端口会规范化为十进制，避免带前导零时生成无效 JSON。
+
+<br>
 
 ## YAML 输出
 
@@ -111,6 +117,8 @@ proxies:
 
 默认 `dual` 监听 `::`。若系统设置 `net.ipv6.bindv6only=1`，脚本会另外添加 `0.0.0.0` 入站，使 IPv4 也能连接，两个入站共用凭据。主机完全禁用 IPv6 时，默认双栈模式退回 IPv4；显式要求 `-i 6` 时直接报告错误。本项目不修改 sysctl 或防火墙。全部地址探测失败时，输出带明显占位符的节点，使用 `-H` 指定地址或手动替换。
 
+<br>
+
 ## 低内存与安装行为
 
 保留原脚本的磁盘临时目录策略、Go 内存目标和服务启动失败回滚：
@@ -134,6 +142,8 @@ tail -n 40 /var/log/sing-box-error.log
 
 环境变量详细选项见 `sh install.sh -h`。
 
+<br>
+
 ## 测试
 
 运行时只依赖 Alpine 系统工具。Python / PyYAML 仅供开发测试；可用 uv 在隔离环境执行：
@@ -143,6 +153,8 @@ uv run --no-project --with PyYAML==6.0.3 python -m unittest discover -s tests -v
 ```
 
 测试覆盖双栈、单栈、IPv6 独立端口、NAT 自定义地址、跳过多余探测、DNS/IP 格式、前导零、异常响应、JSON 元数据、镜像回退、安装锁、临时目录与失败回滚。元数据测试需要 `jq`。GitHub Actions 在 Alpine BusyBox ash 下执行同样测试，并用官方 sing-box 1.14.4 校验 IPv4、IPv6、默认双栈和双独立入站四种配置。回滚测试使用临时目录和模拟 OpenRC 命令，不安装或启动真实代理。
+
+<br>
 
 ## 来源
 
