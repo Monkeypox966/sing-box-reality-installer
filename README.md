@@ -1,46 +1,89 @@
 # sing-box Reality Installer
 
-基于现有 `setup-sing-box.sh` 整理的 **Alpine Linux / OpenRC** 一键脚本项目，安装 sing-box 的 **VLESS + Reality + Vision** 服务，并打印可导入 Mihomo / Clash Meta 的 YAML 节点。
-
-默认双栈模式下，分别探测公网 IPv4 与 IPv6；有可用 IPv6 时输出两个独立节点，共用端口、UUID 和 Reality 参数。IPv6 不可用时只输出 IPv4，纯 IPv6 主机则输出 IPv6。
+在 **Alpine Linux / OpenRC** 服务器上安装 VLESS + Reality + Vision，并生成可导入 Mihomo / Clash Meta 的 YAML 节点。
 
 <br>
 
-## 一键安装
+## 第一步：准备服务器和端口
 
-仓库已公开，无需 GitHub 登录。在 Alpine 服务器上以 root 下载独立脚本并执行：
+通过 SSH 登录 Alpine 服务器，并切换到 **root**。本脚本面向 Alpine / OpenRC，不能直接用于 Debian / Ubuntu。
+
+选择一个可用 TCP 端口，例如下面使用的 **57111**。
+在云平台安全组和服务器防火墙中放行该端口；NAT VPS 还需要提前设置端口映射。
+
+脚本会安装依赖，并安装或替换本机名为 `sing-box` 的服务及其配置。
+默认同时处理 IPv4 和 IPv6，有可用 IPv6 时会多生成一个节点。
+
+<br>
+
+## 第二步：下载并运行脚本
+
+在服务器执行：
 
 ```sh
 wget -O setup-sing-box.sh https://raw.githubusercontent.com/Monkeypox966/sing-box-reality-installer/main/setup-sing-box.sh && sh setup-sing-box.sh -p 57111
 ```
 
-如果已经下载或克隆完整项目，进入源码目录后执行：
+把 `57111` 换成选好的**服务器内部监听端口**。
+`setup-sing-box.sh` 是独立脚本，无需下载其他项目文件。
 
-```sh
-sh install.sh -p 57111
-```
-
-已安装 Git 时，也可以直接克隆公开仓库：
-
-```sh
-git clone https://github.com/Monkeypox966/sing-box-reality-installer.git
-cd sing-box-reality-installer
-sh install.sh -p 57111
-```
-
-也可以将项目目录或单独的 `setup-sing-box.sh` 上传到服务器，直接运行：
-
-```sh
-sh setup-sing-box.sh -p 57111
-```
-
-`setup-sing-box.sh` 是独立脚本，不依赖仓库内其他文件。不带 `-p` 时，如果连接的是交互终端，会提示输入监听端口。
-
-> 只支持 Alpine Linux 和 OpenRC。脚本会安装依赖，并安装或替换本机的 `sing-box` 配置和同名服务；重复运行会生成新凭据。它不会操作其他名称的代理服务，也不会替你修改防火墙或 NAT 映射。
+如果已克隆完整仓库，也可以进入项目目录执行 `sh install.sh -p 57111`。
+不传 `-p` 时，在交互终端中会提示输入端口。
 
 <br>
 
-## 参数
+## 第三步：复制节点到客户端
+
+安装成功后，终端会打印 YAML，文件也保存在：
+
+```sh
+cat /etc/sing-box/client-info.txt
+```
+
+将输出合并到 Mihomo / Clash Meta 的客户端配置：
+
+1. 已有 `proxies:` 时，只复制它下面的节点列表，粘贴到已有列表中，保持缩进。
+2. 没有 `proxies:` 时，复制包含 `proxies:` 的完整节点片段。
+3. 在客户端现有的代理组中选用或加入新节点，保存并重载配置，再测试连接。
+
+输出是**节点配置片段**，完整客户端配置还需要自己的代理组和路由规则。
+IPv4 与 IPv6 节点共用 UUID、Reality 参数和默认端口；使用其中可连接的节点即可。
+无需配置其他可选参数就可以先测试默认安装。
+
+<br>
+
+## 第四步：确认服务与连接
+
+在服务器检查：
+
+```sh
+rc-service sing-box status
+```
+
+确认服务已运行，再在客户端选中节点测试连接。安装器会添加 OpenRC 开机自启动。
+
+如果服务器上有服务但客户端连不上，先检查服务商安全组、防火墙、NAT 映射和 YAML 中的连接地址及端口。
+公网地址探测成功，只能证明出站网络可用，不能保证外部能连入。
+
+<br>
+
+## 日常操作
+
+| 想做什么 | 命令 |
+| --- | --- |
+| 查看服务状态 | `rc-service sing-box status` |
+| 重启服务 | `rc-service sing-box restart` |
+| 停止服务 | `rc-service sing-box stop` |
+| 启动服务 | `rc-service sing-box start` |
+| 再次查看客户端节点 | `cat /etc/sing-box/client-info.txt` |
+| 查看最近错误日志 | `tail -n 40 /var/log/sing-box-error.log` |
+| 查看全部脚本选项 | `sh setup-sing-box.sh -h` |
+
+停止服务不会取消开机自启动。重新运行安装脚本会生成新凭据，之后需要重新复制节点到客户端。
+
+<br>
+
+## 可选参数与 NAT 配置
 
 | 参数 | 含义 | 默认值 |
 |---|---|---|
@@ -58,17 +101,17 @@ sh setup-sing-box.sh -p 57111
 
 ```sh
 # NAT 示例：内部端口 10000，映射端口 57111
-sh install.sh -p 10000 -e 57111 -H 203.0.113.10
+sh setup-sing-box.sh -p 10000 -e 57111 -H 203.0.113.10
 
 # IPv4 走 NAT 映射端口，原生 IPv6 直连内部监听端口
-sh install.sh -p 10000 -e 57111 -E 10000 -H 203.0.113.10
+sh setup-sing-box.sh -p 10000 -e 57111 -E 10000 -H 203.0.113.10
 
 # 仅 IPv4 / 仅 IPv6
-sh install.sh -p 57111 -i 4
-sh install.sh -p 57111 -i 6
+sh setup-sing-box.sh -p 57111 -i 4
+sh setup-sing-box.sh -p 57111 -i 6
 
 # 指定 SNI 与版本
-sh install.sh -p 57111 -s images.apple.com -v 1.14.4
+sh setup-sing-box.sh -p 57111 -s images.apple.com -v 1.14.4
 ```
 
 默认仍使用 `-e` 作为所有节点的连接端口；若 NAT 映射仅作用于 IPv4，可用 `-E` 单独设置原生 IPv6 的端口。`-H` 指定 IPv4 时保留该地址并补充探测到的 IPv6；指定 IPv6 时保留该地址并补充 IPv4；指定域名时保留域名并补充 IPv6。单协议模式只输出该模式探测到的地址或显式指定的地址。
@@ -77,7 +120,30 @@ sh install.sh -p 57111 -s images.apple.com -v 1.14.4
 
 <br>
 
-## YAML 输出
+## 常见问题
+
+**NAT VPS 应该填哪个端口？** `-p` 填服务器内部监听端口，`-e` 填外部映射端口，
+`-H` 填客户端连接的 IP 或域名。IPv6 不经 NAT 时，可用 `-E` 单独指定 IPv6 连接端口。
+
+**没有 IPv6 可以用吗？** 可以。IPv6 不可用时，默认双栈模式只输出可用的 IPv4；
+也可以显式使用 `-i 4`。纯 IPv6 服务器使用 `-i 6` 并确保客户端也能访问 IPv6。
+
+**生成的地址是占位符？** 自动探测没有得到可用地址。用 `-H` 显式指定 IP 或域名后重新生成，
+或手动替换客户端节点中的连接地址。
+
+**提示安装锁被占用？** 先检查是否有另一个安装进程正在运行。
+若先前安装被强制终止，确认锁目录 `/run/sing-box-setup.lock` 中记录的进程已结束后，再清理旧锁。
+
+<br>
+
+## 完整示例与实现细节（可选）
+
+<details>
+<summary>展开 YAML 示例、安装行为和开发测试</summary>
+
+<br>
+
+### 完整 YAML 示例与输出规则
 
 最终配置保存到 `/etc/sing-box/client-info.txt`，同时打印到终端。例如：
 
@@ -119,7 +185,7 @@ proxies:
 
 <br>
 
-## 低内存与安装行为
+### 低内存与安装行为
 
 保留原脚本的磁盘临时目录策略、Go 内存目标和服务启动失败回滚：
 
@@ -144,7 +210,7 @@ tail -n 40 /var/log/sing-box-error.log
 
 <br>
 
-## 测试
+### 开发测试
 
 运行时只依赖 Alpine 系统工具。Python / PyYAML 仅供开发测试；可用 uv 在隔离环境执行：
 
@@ -153,6 +219,8 @@ uv run --no-project --with PyYAML==6.0.3 python -m unittest discover -s tests -v
 ```
 
 测试覆盖双栈、单栈、IPv6 独立端口、NAT 自定义地址、跳过多余探测、DNS/IP 格式、前导零、异常响应、JSON 元数据、镜像回退、安装锁、临时目录与失败回滚。元数据测试需要 `jq`。GitHub Actions 在 Alpine BusyBox ash 下执行同样测试，并用官方 sing-box 1.14.4 校验 IPv4、IPv6、默认双栈和双独立入站四种配置。回滚测试使用临时目录和模拟 OpenRC 命令，不安装或启动真实代理。
+
+</details>
 
 <br>
 
