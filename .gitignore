@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+*.pyc
+*.tar.gz
+*.tar.xz
+*.zip
+*.log
+*.bak*
+client-info.txt
+config.json
+*.key
+.env
+.env.*

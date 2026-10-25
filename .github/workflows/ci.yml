@@ -1,0 +1,43 @@
+name: Validate installer
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shell-and-yaml:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: POSIX shell syntax and ShellCheck
+        run: |
+          sh -n setup-sing-box.sh
+          sh -n install.sh
+          sh -n tests/check-config.sh
+          shellcheck -x -s sh setup-sing-box.sh install.sh tests/check-config.sh
+      - name: IPv4, IPv6 and YAML regression tests
+        run: uv run --no-project --with PyYAML==6.0.3 python tests/test_clients.py
+      - name: Validate with official sing-box
+        run: |
+          task_dir=$(mktemp -d)
+          trap 'rm -rf "$task_dir"' EXIT
+          curl -fsSL https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64-musl.tar.gz -o "$task_dir/sing-box.tar.gz"
+          printf '%s  %s\n' 8f7c5f0651238850d96a0e488e5473cd77ec1a0098f63942e943f475a12057ca "$task_dir/sing-box.tar.gz" | sha256sum --check
+          tar -xzf "$task_dir/sing-box.tar.gz" -C "$task_dir"
+          sh tests/check-config.sh "$task_dir/sing-box-1.14.4-linux-amd64-musl/sing-box"
+  alpine-shell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: BusyBox ash syntax, help and YAML tests
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src alpine:3.22 sh -ec '
+            apk add --no-cache python3 py3-yaml
+            sh -n setup-sing-box.sh
+            sh install.sh -h
+            python3 tests/test_clients.py
+          '
