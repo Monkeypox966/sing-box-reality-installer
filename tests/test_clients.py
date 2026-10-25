@@ -1,46 +1,20 @@
 """Test the real POSIX-shell renderers with deterministic network responses."""
 import ipaddress
 import json
-import os
-from pathlib import Path
 import subprocess
-import tempfile
 import unittest
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "setup-sing-box.sh"
+from helpers import SCRIPT, ShellTestCase
 
 
-class ClientOutputTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="sing-box-output-test-")
-        self.addCleanup(self.temp.cleanup)
-        self.mockbin = Path(self.temp.name)
-        wget = self.mockbin / "wget"
-        wget.write_text('''#!/bin/sh
-case "$1" in
-  -4) [ -n "${TEST_IPV4:-}" ] || exit 1; printf '%s' "$TEST_IPV4" ;;
-  -6) [ -n "${TEST_IPV6:-}" ] || exit 1; printf '%s' "$TEST_IPV6" ;;
-  *) exit 99 ;;
-esac
-''', encoding="utf-8")
-        wget.chmod(0o755)
-        self.env = dict(os.environ, SING_BOX_SETUP_LIBRARY_ONLY="1")
-        self.env["PATH"] = str(self.mockbin) + os.pathsep + self.env["PATH"]
-
-    def shell(self, code, **env):
-        return subprocess.run(
-            ["sh", "-eu", "-c", '. "$1"; ' + code, "test", str(SCRIPT)],
-            env=dict(self.env, **env), capture_output=True, text=True, check=True,
-        )
-
-    def render(self, ipv4="198.51.100.10", ipv6="2606:4700:4700::1111", mode="dual", host=""):
+class ClientOutputTests(ShellTestCase):
+    def render(self, ipv4="198.51.100.10", ipv6="2606:4700:4700::1111", mode="dual", host="", ipv6_port="", **env):
         code = '''IP_MODE="$TEST_MODE"; CUSTOM_HOST="$TEST_HOST";
-EXT_PORT=57111; UUID=11111111-1111-4111-8111-111111111111;
+EXT_PORT=57111; IPV6_EXT_PORT="$TEST_IPV6_PORT"; UUID=11111111-1111-4111-8111-111111111111;
 SNI=amd.com; PUBLIC_KEY=test-public-key; SHORT_ID=0012; print_client_yaml'''
-        result = self.shell(code, TEST_IPV4=ipv4, TEST_IPV6=ipv6, TEST_MODE=mode, TEST_HOST=host)
+        result = self.shell(code, TEST_IPV4=ipv4, TEST_IPV6=ipv6, TEST_MODE=mode, TEST_HOST=host, TEST_IPV6_PORT=ipv6_port, **env)
         return yaml.safe_load(result.stdout)["proxies"], result
 
     def test_dual_stack_is_two_independent_yaml_nodes(self):
@@ -103,6 +77,66 @@ SNI=amd.com; PUBLIC_KEY=test-public-key; SHORT_ID=0012; print_client_yaml'''
         nodes, result = self.render(ipv4="", ipv6="")
         self.assertEqual(nodes[0]["server"], "<server-ip-or-domain>")
         self.assertIn("detection failed", result.stderr)
+
+    def test_separate_ipv6_client_port_for_nat(self):
+        nodes, _ = self.render(ipv6_port="10000")
+        self.assertEqual([node["port"] for node in nodes], [57111, 10000])
+
+    def test_custom_single_family_host_skips_all_probes(self):
+        log = self.mockbin / "requests"
+        self.render(host="proxy.example.com", mode="4", TEST_REQUEST_LOG=str(log))
+        self.assertFalse(log.exists())
+
+    def test_custom_ipv4_only_probes_ipv6(self):
+        log = self.mockbin / "requests"
+        self.render(host="203.0.113.20", TEST_REQUEST_LOG=str(log))
+        self.assertEqual(log.read_text().splitlines(), ["-6"])
+
+    def test_failed_http_response_is_not_accepted_as_an_address(self):
+        nodes, _ = self.render(TEST_HTTP_STATUS="8")
+        self.assertEqual(nodes[0]["name"], "reality-manual")
+
+    def test_addresses_with_embedded_line_breaks_are_rejected(self):
+        nodes, _ = self.render(ipv4="198.51.\n100.10", ipv6="2606:4700:\n4700::1111")
+        self.assertEqual(nodes[0]["name"], "reality-manual")
+
+    def test_custom_host_and_dns_are_validated_as_real_addresses(self):
+        for value in ("256.1.1.1", "1.2.3", ":::", "2001:db8:1:2:3:4:5:6:7"):
+            with self.subTest(value=value):
+                result = self.shell('if is_safe_ip_literal "$TEST_IP"; then exit 9; fi', TEST_IP=value)
+                self.assertEqual(result.returncode, 0)
+        for value in ("8.8.8.8", "::1", "2001:4860:4860::8888"):
+            self.shell('is_safe_ip_literal "$TEST_IP"', TEST_IP=value)
+
+    def test_service_retains_custom_memory_settings(self):
+        result = self.shell('SING_BOX_GOMEMLIMIT=48MiB; SING_BOX_GOGC=25; write_openrc_service')
+        self.assertIn("${SING_BOX_GOMEMLIMIT:=48MiB}", result.stdout)
+        self.assertIn("${SING_BOX_GOGC:=25}", result.stdout)
+        subprocess.run(["sh", "-n"], input=result.stdout, text=True, check=True)
+
+    def test_dual_mode_uses_two_listeners_when_ipv6_sockets_are_v6_only(self):
+        result = self.shell('''DNS_SERVER=8.8.8.8; STRATEGY=prefer_ipv6; LISTEN_ADDR=::;
+IP_MODE=dual; BINDV6ONLY=1; PORT=57111; UUID=test; SNI=images.apple.com;
+PRIVATE_KEY=test; SHORT_ID=0012; write_server_config''')
+        inbounds = json.loads(result.stdout)["inbounds"]
+        self.assertEqual([item["listen"] for item in inbounds], ["::", "0.0.0.0"])
+        self.assertEqual(len({item["tag"] for item in inbounds}), 2)
+        self.assertEqual(inbounds[0]["users"], inbounds[1]["users"])
+
+    def test_disabled_ipv6_falls_back_to_ipv4_without_changing_sysctl(self):
+        result = self.shell('sysctl() { printf "1\\n"; }; configure_listen_mode; printf "%s %s\\n" "$IP_MODE" "$LISTEN_ADDR"')
+        self.assertEqual(result.stdout, "4 0.0.0.0\n")
+
+    def test_explicit_ipv6_mode_fails_when_ipv6_is_disabled(self):
+        with self.assertRaises(subprocess.CalledProcessError) as context:
+            self.shell('sysctl() { printf "1\\n"; }; IP_MODE=6; configure_listen_mode')
+        self.assertIn("IPv6 is disabled", context.exception.stderr)
+
+    def test_invalid_ipv6_port_and_malformed_dns_fail_before_installation(self):
+        for args in (("-E", "70000"), ("-d", "1.2.3"), ("-H", "256.1.1.1")):
+            result = subprocess.run(["sh", str(SCRIPT), "-p", "57111", *args], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("Installing dependencies", result.stdout)
 
     def test_server_config_is_valid_json_and_ipv6_listens_on_all_interfaces(self):
         result = self.shell('''DNS_SERVER=8.8.8.8; STRATEGY=prefer_ipv6; LISTEN_ADDR=::;

@@ -42,6 +42,7 @@ sh setup-sing-box.sh -p 57111
 |---|---|---|
 | `-p` | 服务器内部监听端口，必填或交互输入 | 无 |
 | `-e` | YAML 中的客户端连接端口 | 与 `-p` 相同 |
+| `-E` | 单独指定 IPv6 节点的连接端口 | 与 `-e` 相同 |
 | `-H` | 自定义客户端连接 IP 或域名，适用于 NAT VPS | 自动探测 |
 | `-i` | 监听模式：`4`、`6`、`dual` | `dual` |
 | `-s` | Reality SNI 域名 | `images.apple.com` |
@@ -55,6 +56,9 @@ sh setup-sing-box.sh -p 57111
 # NAT 示例：内部端口 10000，映射端口 57111
 sh install.sh -p 10000 -e 57111 -H 203.0.113.10
 
+# IPv4 走 NAT 映射端口，原生 IPv6 直连内部监听端口
+sh install.sh -p 10000 -e 57111 -E 10000 -H 203.0.113.10
+
 # 仅 IPv4 / 仅 IPv6
 sh install.sh -p 57111 -i 4
 sh install.sh -p 57111 -i 6
@@ -63,7 +67,9 @@ sh install.sh -p 57111 -i 6
 sh install.sh -p 57111 -s images.apple.com -v 1.14.4
 ```
 
-`-e` 适用于输出的所有节点。如果 NAT 映射仅作用于 IPv4，而原生 IPv6 应连接另一个端口，需要在客户端 YAML 中修改 IPv6 节点的 `port`。`-H` 指定 IPv4 时保留该地址并补充探测到的 IPv6；指定 IPv6 时保留该地址并补充 IPv4；指定域名时保留域名并补充 IPv6。单协议模式只输出该模式探测到的地址或显式指定的地址。
+默认仍使用 `-e` 作为所有节点的连接端口；若 NAT 映射仅作用于 IPv4，可用 `-E` 单独设置原生 IPv6 的端口。`-H` 指定 IPv4 时保留该地址并补充探测到的 IPv6；指定 IPv6 时保留该地址并补充 IPv4；指定域名时保留域名并补充 IPv6。单协议模式只输出该模式探测到的地址或显式指定的地址。
+
+已指定的地址不会再次探测：例如 `-i 4 -H proxy.example.com` 不发公网探测请求；双栈模式指定 IPv4 时只探测 IPv6。HTTP 请求失败或返回的地址格式异常时，不采用该响应。端口会规范化为十进制，避免带前导零时生成无效 JSON。
 
 ## YAML 输出
 
@@ -103,18 +109,21 @@ proxies:
 
 如果现有配置已经有 `proxies:`，只复制下面的节点列表。公网探测使用强制 IPv4 / IPv6 的 HTTPS 请求；IPv6 回环、链路本地、ULA、组播或异常响应不会作为自动节点输出。探测成功代表有该协议的出站连通性，不能代替入站端口、防火墙和 NAT 检查。
 
-默认 `dual` 监听 `::`。若系统设置 `net.ipv6.bindv6only=1`，脚本会提示该监听可能不接受 IPv4；本项目不自动修改系统网络参数。全部地址探测失败时，输出带明显占位符的节点，使用 `-H` 指定地址或手动替换。
+默认 `dual` 监听 `::`。若系统设置 `net.ipv6.bindv6only=1`，脚本会另外添加 `0.0.0.0` 入站，使 IPv4 也能连接，两个入站共用凭据。主机完全禁用 IPv6 时，默认双栈模式退回 IPv4；显式要求 `-i 6` 时直接报告错误。本项目不修改 sysctl 或防火墙。全部地址探测失败时，输出带明显占位符的节点，使用 `-H` 指定地址或手动替换。
 
 ## 低内存与安装行为
 
 保留原脚本的磁盘临时目录策略、Go 内存目标和服务启动失败回滚：
 
-- 默认 `GOMEMLIMIT=64MiB`、`GOGC=50`；Go 内存目标不是操作系统强制上限。
+- 默认 `GOMEMLIMIT=64MiB`、`GOGC=50`；自定义的 `SING_BOX_GOMEMLIMIT` 和 `SING_BOX_GOGC` 会写入生成的服务默认值，重启后继续生效。Go 内存目标不是操作系统强制上限。
 - 临时目录优先放在 `/root` 或 `/var/tmp` 的磁盘文件系统中；默认要求约 180 MB 可用空间。
 - 新配置先由新二进制执行 `sing-box check`，成功后再替换原有文件。
-- 原有二进制、配置和 OpenRC 脚本会保留带时间戳的备份；服务启动失败时尝试回滚。
+- 原有二进制、服务器配置、客户端 YAML 和 OpenRC 脚本会保留带时间戳的备份。替换文件后发生可捕获错误或中断时，会停止本项目服务，以原子替换方式恢复旧文件，再按原有运行状态恢复服务；首次安装失败时清除新文件和新加的自启动项。旧错误日志不会被清空。
 - 下载包和解压目录自动清理。为支持回滚，历史备份不会自动删除。
 - sing-box 仍由 OpenRC 管理，服务名为 `sing-box`。
+- 使用 `/run/sing-box-setup.lock` 阻止同时安装，正常退出会清理锁。强制终止或断电无法执行回滚；若留下锁目录，先检查其中的 `pid` 并确认安装进程已结束，再清理旧锁。
+
+安装时会增加轻量的 `jq` 依赖，用于精确读取 GitHub JSON 元数据，避免因字段顺序、压缩格式或近似文件名选错 SHA-256。它不参与代理服务的日常运行。官方 API 不可用时回退到已验证的 sing-box 1.14.4；第三方镜像下载仍要求提供可信 SHA-256。
 
 ```sh
 rc-service sing-box status
@@ -130,10 +139,10 @@ tail -n 40 /var/log/sing-box-error.log
 运行时只依赖 Alpine 系统工具。Python / PyYAML 仅供开发测试；可用 uv 在隔离环境执行：
 
 ```sh
-uv run --no-project --with PyYAML==6.0.3 python tests/test_clients.py
+uv run --no-project --with PyYAML==6.0.3 python -m unittest discover -s tests -v
 ```
 
-测试覆盖双栈、单栈、NAT 自定义地址、域名、IPv6 格式、短 ID 前导零、失败探测、无 root 帮助，以及服务器 JSON 生成。GitHub Actions 还在 Alpine BusyBox ash 下检查语法，并用官方 sing-box 1.14.4 校验三种监听模式的配置。所有测试均不安装或启动代理服务。
+测试覆盖双栈、单栈、IPv6 独立端口、NAT 自定义地址、跳过多余探测、DNS/IP 格式、前导零、异常响应、JSON 元数据、镜像回退、安装锁、临时目录与失败回滚。元数据测试需要 `jq`。GitHub Actions 在 Alpine BusyBox ash 下执行同样测试，并用官方 sing-box 1.14.4 校验 IPv4、IPv6、默认双栈和双独立入站四种配置。回滚测试使用临时目录和模拟 OpenRC 命令，不安装或启动真实代理。
 
 ## 来源
 

@@ -19,7 +19,7 @@ jobs:
           sh -n tests/check-config.sh
           shellcheck -x -s sh setup-sing-box.sh install.sh tests/check-config.sh
       - name: IPv4, IPv6 and YAML regression tests
-        run: uv run --no-project --with PyYAML==6.0.3 python tests/test_clients.py
+        run: uv run --no-project --with PyYAML==6.0.3 python -m unittest discover -s tests -v
       - name: Validate with official sing-box
         run: |
           task_dir=$(mktemp -d)
@@ -36,8 +36,8 @@ jobs:
       - name: BusyBox ash syntax, help and YAML tests
         run: |
           docker run --rm -v "$PWD:/src:ro" -w /src alpine:3.22 sh -ec '
-            apk add --no-cache python3 py3-yaml
+            apk add --no-cache python3 py3-yaml jq
             sh -n setup-sing-box.sh
             sh install.sh -h
-            python3 tests/test_clients.py
+            python3 -m unittest discover -s tests -v
           '
