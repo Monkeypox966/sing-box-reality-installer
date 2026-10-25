@@ -6,16 +6,22 @@
 
 ## 一键安装
 
-在 Alpine 服务器上以 root 执行，源码目录内只需一条命令：
+仓库已公开，无需 GitHub 登录。在 Alpine 服务器上以 root 下载独立脚本并执行：
+
+```sh
+wget -O setup-sing-box.sh https://raw.githubusercontent.com/Monkeypox966/sing-box-reality-installer/main/setup-sing-box.sh && sh setup-sing-box.sh -p 57111
+```
+
+如果已经下载或克隆完整项目，进入源码目录后执行：
 
 ```sh
 sh install.sh -p 57111
 ```
 
-仓库默认是私有仓库，需要先取得授权副本。例如在已登录 GitHub CLI 的机器上：
+已安装 Git 时，也可以直接克隆公开仓库：
 
 ```sh
-gh repo clone Monkeypox966/sing-box-reality-installer
+git clone https://github.com/Monkeypox966/sing-box-reality-installer.git
 cd sing-box-reality-installer
 sh install.sh -p 57111
 ```
@@ -131,6 +137,6 @@ uv run --no-project --with PyYAML==6.0.3 python tests/test_clients.py
 
 ## 来源
 
-项目基于用户提供的原始脚本修改，未整体复制其他安装器。开发前参考了 [SagerNet/sing-box](https://github.com/SagerNet/sing-box)、[eooce/Sing-box](https://github.com/eooce/Sing-box) 等已有实现，保留原项目的 Alpine 单协议安装定位。
+项目基于用户提供的原始脚本修改，未整体复制其他安装器。开发前参考了 [SagerNet/sing-box](https://github.com/SagerNet/sing-box)、[eooce/Sing-box](https://github.com/eooce/Sing-box) 等已有实现，面向 Alpine / OpenRC 和低内存部署，当前默认支持 IPv4 / IPv6 双栈。
 
 IPv4 / IPv6 的 YAML 增强之外，还添加了 Alpine 前置检查，并删除了未被路由使用的旧 `block` 出站，避免新版 sing-box 对旧类型的兼容问题。仓库不含真实服务器配置、生成的私钥或连接凭据。
